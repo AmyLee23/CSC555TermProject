@@ -93,30 +93,31 @@ class DistRedistAgent(OneShotSyncAgent):
         dist.update(dict(zip(partner_ids, distribute(int(1.35 * needs), partners))))
         return dist
     
-    '''def calc_weighted_score(self, partners) :
-        for partner in partners: 
-            successful_contracts = self.all_partners_info[partner][0]
-            total_quantity = self.all_partners_info[partner][1]
-            unsuccessful_contracts = self.all_partners_info[partner][2]
-            age_of_data = self.all_partners_info[partner][3]  # Assuming you track the age of data in some way
+    # Calculate a priority score based on exponential decay (10%)
+    def calc_weighted_score(self, partners) :
+        for p in partners: 
+            s_contracts = self.all_partners_info[p][0]
+            total_quantity = self.all_partners_info[p][1]
+            u_contracts = self.all_partners_info[p][2]
+            contractAge = self.all_partners_info[p][3]
 
             # Apply the decay factor to adjust the weight of older data
-            decayed_successful_contracts = successful_contracts * (self.decay_factor ** age_of_data)
-            decayed_total_quantity = total_quantity * (self.decay_factor ** age_of_data)
-            decayed_unsuccessful_contracts = unsuccessful_contracts * (self.decay_factor ** age_of_data)
+            ds_contracts = s_contracts * (self.decay_factor ** contractAge)
+            decayed_total_quantity = total_quantity * (self.decay_factor ** contractAge)
+            du_contracts = u_contracts * (self.decay_factor ** contractAge)
+            totald_contracts = ds_contracts + du_contracts
 
             # Calculate average quantity and success rate using decayed values
-            if (decayed_successful_contracts + decayed_unsuccessful_contracts) == 0 or decayed_successful_contracts == 0:
+            if (totald_contracts) == 0 or ds_contracts == 0:
                 return 0
 
-            average_quantity = decayed_total_quantity / decayed_successful_contracts
-            success_rate = decayed_successful_contracts / (decayed_successful_contracts + decayed_unsuccessful_contracts)
+            average_quantity = decayed_total_quantity / ds_contracts    # this is the important change 
+            success_rate = ds_contracts / totald_contracts
 
-            # Calculate a priority score based on decayed metrics
             priority_score = average_quantity * success_rate
-        return priority_score'''
+        return priority_score
 
-
+    # original priority score calculation, without decay factor 
     def get_partners_list(self, partners) :
         partner_list = []
 
@@ -143,7 +144,6 @@ class DistRedistAgent(OneShotSyncAgent):
         # Storing the needs (resources) that the agent wants to distribute
         # the agent will attempt to distribute amongst their partners.
         dist = dict()
-
         if len(partners) == 0:
             return dist
 
@@ -153,9 +153,14 @@ class DistRedistAgent(OneShotSyncAgent):
             dist.update(dict(zip(partners, [0] * len(partners))))
             return dist
         
-        # priority values
-        partners_list = self.get_partners_list(partners)
-        priority_list = sorted(partners_list, key=lambda x: x[1], reverse=True)
+        #partners_list = self.get_partners_list(partners)
+
+        # Calculate priority scores for each partner
+        partner_list = [
+            [partner, self.calc_weighted_score(partner), 0] for partner in partners
+        ]
+
+        priority_list = sorted(partner_list, key=lambda x: x[1], reverse=True)
 
         sum = 0
         for i in range(len(priority_list)):
@@ -425,20 +430,22 @@ class DistRedistAgent(OneShotSyncAgent):
         return s, random.randint(pmin, pmax)
 
     def before_step(self):
-        self.round = 0
-
+        # Check if the all_partners_info dictionary has been initialized
         if self.awi.current_step == 0:
-            if self.awi.is_first_level == True:
+            if self.awi.is_first_level:
                 all_partners = self.awi.my_consumers
             else:
                 all_partners = self.awi.my_suppliers
 
-            # (Number of successful contracts, Contract quantity, Number of contract rounds, Number of unsuccessful contracts)
-            # number of contract rounds not stored 
-            # add 4th index for contract_age  
-            self.all_partners_info = {partner: [0, 0, 0] for partner in all_partners}
+            # Initialize all_partners_info only once, without resetting at every step
+            self.all_partners_info = {partner: [0, 0, 0, 0] for partner in all_partners}
+        else:
+            # Increment the age of data for each partner in subsequent steps
+            for p in self.all_partners_info:
+                self.all_partners_info[p][3] += 1  # Increment age of data
 
         return super().before_step()
+    
 
     def on_negotiation_success(self, contract: Contract, mechanism: SAONMI) -> None:
         if self.awi.is_first_level == True:
