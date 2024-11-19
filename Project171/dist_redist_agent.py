@@ -31,17 +31,6 @@ __all__ = ["DistRedistAgent"]
 def distribute(q: int, n: int) -> list[int]:
     """Distributes n values over m bins with at
     least one item per bin assuming q > n"""
-    # q < n 
-    # Not enough  agents and resources for each bin.
-    # The remaining agents are assigned randomly
-
-    #q == n:
-    # Exactly one agent per bin
-
-    # q > n
-    # Each bin starts with one agent and the remaining are assigned randomly
-
-    # q is the number of agents and n is the number of groups
     from numpy.random import choice
     from collections import Counter
 
@@ -60,11 +49,6 @@ def distribute(q: int, n: int) -> list[int]:
 
 
 def powerset(iterable):
-    # empty set and itself. 
-    # If agents represent object, the power set of these object represent all possible outcomes of those agents
-    # 1) Empty set: No agents are selected
-    # 2) Single-Agent Sets: Subset where only one agent is selected
-    # 3) Larger Sets: subsets where groups of agents are selected.
     s = list(iterable)
     return chain.from_iterable(combinations(s, r) for r in range(len(s) + 1))
 
@@ -74,11 +58,9 @@ class DistRedistAgent(OneShotSyncAgent):
     random_p: float
     all_partners_info = dict()
 
-    def __init__(self, initial_season="winter"):
-        # random event effecting the agent's 
+    def __init__(self):
         self.random_p = 0.07
         super().__init__()
-        self.current_season = initial_season
 
     def distribute_needs_randomly(self, needs, partner_ids) -> dict[str, int]:
         dist = dict()
@@ -93,19 +75,15 @@ class DistRedistAgent(OneShotSyncAgent):
         return dist
 
     def distribute_by_info(self, need, partners):
-        # Storing the needs (resources) that the agent wants to distribute
-        # the agent will attempt to distribute amongst their partners.
         dist = dict()
 
         if len(partners) == 0:
             return dist
 
         if need <= 0:
-        # If agents have no needs to distribute the function will distribute 0 to their partners that means no
-        # distribution occurs
             dist.update(dict(zip(partners, [0] * len(partners))))
             return dist
-# priority values
+
         partner_list = [
             [
                 partner,
@@ -169,7 +147,6 @@ class DistRedistAgent(OneShotSyncAgent):
         return dist
 
     def distribute_by_offers(self, need, partners, offers):
-        # increment by one 
         dist = dict()
 
         if len(partners) == 0:
@@ -242,31 +219,7 @@ class DistRedistAgent(OneShotSyncAgent):
         self.round += 1
         response = dict()
 
-        # Created Seasons based upon certain factors: These can be adjusted or changed
-        #Price_multipler: multiples the base price according to different to different seasons
-        # Threshold : When an offer is made the threshold will be the minimum amount of resources needed
-        # random_p : Randmoness of distributing resources
-
-        # winter: P) Higher prices because of reduced supply T) able to accept lower prices P) Lower randomness
-        # spring: P) lower price multiplier due to increased demand. T) higher thresholds due to abundant resources P) high randomness b/c of new surplus
-        # summer P) Moderate price increase, due to travel T) Moderate Threshold
-        # Autumn: P)  Stable prices T) Resources become more scarce P) Unpredictable shortages due to weather
-        seasonal_factors = {
-            "winter": {"price_multiplier": 1.2, "threshold": 10, "random_p": 0.3},
-            "spring": {"price_multiplier": 0.9, "threshold": 15, "random_p": 0.5},
-            "summer": {"price_multiplier": 1.1, "threshold": 12, "random_p": 0.4},
-            "autumn": {"price_multiplier": 1.0, "threshold": 14, "random_p": 0.6},
-        }
-        # The current season
-        season = self.current_season
-        factors = seasonal_factors.get(season, {"price_multiplier": 1.0, "threshold": 15, "random_p": 0.5})
-
-        # The threshold and the randmoness is based upon the season
-        th = factors["threshold"]
-        self.random_p = factors["random_p"]
-
-        # Needs: How much is needed or required (supplies or sales)
-        # issues: 
+        # process for sales and supplies independently
         for needs, all_partners, issues in [
             (
                 self.awi.needed_supplies,
@@ -279,22 +232,20 @@ class DistRedistAgent(OneShotSyncAgent):
                 self.awi.current_output_issues,
             ),
         ]:
-            # appling the price_multiplier to the base price based upon the season
-            base_price = issues[UNIT_PRICE].rand()
-            price = base_price * factors["price_multiplier"]
+            # get a random price
+            price = issues[UNIT_PRICE].rand()
 
-            # Generating all the parnter subsets for evaluation
+            # find active partners
             partners = {_ for _ in all_partners if _ in offers.keys()}
             plist = list(powerset(partners))
 
             offers_list = []
             for i, partner_ids in enumerate(plist):
-                # Total amount of offered by these partners
                 others = partners.difference(partner_ids)
                 offered = sum(offers[p][QUANTITY] for p in partner_ids)
 
                 offer_list = [offers[p] for p in partner_ids]
-                # Evaluates the value of this subset of offers
+
                 utility = self.ufun.from_offers(
                     tuple(offer_list),
                     tuple([True for _ in range(len(offer_list))]),
@@ -304,14 +255,14 @@ class DistRedistAgent(OneShotSyncAgent):
                 offers_list.append((offered, partner_ids, others, utility))
 
             sorted_offers_list = sorted(offers_list, key=lambda x: x[3], reverse=True)
+            th = 0
             th_round = 16
             th_over = 2
 
             for i, (offered, partner_ids, others, utility) in enumerate(
                 sorted_offers_list
             ):
-                # if all offers are processed and needs have not been met:
-                # Randmonly redistribute the needs based on the random probability
+                # Redistribute when the 'for' loop is about to finish
                 if i == len(sorted_offers_list) - 1 and needs != 0:
                     if random.random() < self.random_p:
                         distribution = self.distribute_needs_randomly(
@@ -334,7 +285,7 @@ class DistRedistAgent(OneShotSyncAgent):
                         }
                     )
                     break
-                # only accept the offer if the offer exceeds the threshold
+
                 if needs > offered:
                     if offered >= th:
                         others = list(others)
@@ -369,6 +320,7 @@ class DistRedistAgent(OneShotSyncAgent):
                     if self.round <= th_round:
                         continue
                     else:
+                        # accept
                         if offered - needs <= th_over:
                             others = list(others)
                             response |= {
@@ -393,6 +345,7 @@ class DistRedistAgent(OneShotSyncAgent):
                     }
                     break
 
+        return response
 
     def _step_and_price(self, best_price=False):
         """Returns current step and a random (or max) price"""
