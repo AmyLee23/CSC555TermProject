@@ -379,8 +379,10 @@ class DistRedistAgent(OneShotSyncAgent):
 
         return s, int(adjusted_price)
 
-    def adjust_thresholds_for_seasonality(self):
-        seasonal_factor = self.calculate_seasonal_factor()  # Get the seasonal adjustment
+    def thresholds_for_seasons(self):
+        seasonal_factor = self.seasonal_amplitude * math.sin(
+            self.seasonal_frequency * self.awi.current_step + self.seasonal_phase_shift
+        )
 
         # Adjust 'th' based on seasonal pricing
         self.th = max(0, self.base_th * (1 + seasonal_factor))
@@ -396,6 +398,7 @@ class DistRedistAgent(OneShotSyncAgent):
             self.th_over = max(1, self.base_th_over - 1)
         else:  # Low prices, more tolerance
             self.th_over = self.base_th_over + 1
+
 
     def before_step(self):
         self.round = 0
