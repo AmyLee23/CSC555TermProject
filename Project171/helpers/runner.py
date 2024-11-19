@@ -61,8 +61,11 @@ def run(
         -1
     ]
     # display results
-    pass # print(tabulate(results.total_scores, headers="keys", tablefmt="psql"))  # type: ignore
-    pass # print(f"Finished in {humanize_time(time.perf_counter() - start)}")
+    #print(tabulate(results.total_scores, headers="keys", tablefmt="psql"))  # type: ignore
+    #print(f"Finished in {humanize_time(time.perf_counter() - start)}")
+
+    #results.plot_stats(agg=False) # will this work?
+
 
 
 if __name__ == "__main__":

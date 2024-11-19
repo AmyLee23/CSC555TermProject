@@ -72,11 +72,12 @@ def powerset(iterable):
 class DistRedistAgent(OneShotSyncAgent):
     round: int
     random_p: float
-    all_partners_info = dict()
+    all_partners_info = dict()  # adding a new field to this dict
 
     def __init__(self, initial_season="winter"):
-        # random event effecting the agent's 
+        # random event effecting the agents
         self.random_p = 0.07
+        self.decay_factor = 0.9  # Decay factor for historical data (e.g., 0.9 means a 10% decay per step)
         super().__init__()
         self.current_season = initial_season
 
@@ -91,6 +92,52 @@ class DistRedistAgent(OneShotSyncAgent):
         # distribute my needs over my (remaining) partners.
         dist.update(dict(zip(partner_ids, distribute(int(1.35 * needs), partners))))
         return dist
+    
+    '''def calc_weighted_score(self, partners) :
+        for partner in partners: 
+            successful_contracts = self.all_partners_info[partner][0]
+            total_quantity = self.all_partners_info[partner][1]
+            unsuccessful_contracts = self.all_partners_info[partner][2]
+            age_of_data = self.all_partners_info[partner][3]  # Assuming you track the age of data in some way
+
+            # Apply the decay factor to adjust the weight of older data
+            decayed_successful_contracts = successful_contracts * (self.decay_factor ** age_of_data)
+            decayed_total_quantity = total_quantity * (self.decay_factor ** age_of_data)
+            decayed_unsuccessful_contracts = unsuccessful_contracts * (self.decay_factor ** age_of_data)
+
+            # Calculate average quantity and success rate using decayed values
+            if (decayed_successful_contracts + decayed_unsuccessful_contracts) == 0 or decayed_successful_contracts == 0:
+                return 0
+
+            average_quantity = decayed_total_quantity / decayed_successful_contracts
+            success_rate = decayed_successful_contracts / (decayed_successful_contracts + decayed_unsuccessful_contracts)
+
+            # Calculate a priority score based on decayed metrics
+            priority_score = average_quantity * success_rate
+        return priority_score'''
+
+
+    def get_partners_list(self, partners) :
+        partner_list = []
+
+        for p in partners:
+            s_contracts = self.all_partners_info[p][0]
+            total_quantity = self.all_partners_info[p][1]
+            u_contracts = self.all_partners_info[p][2]
+            total_contracts = s_contracts + u_contracts
+
+            # Check if the denominator is not zero to avoid division errors
+            if total_contracts != 0 and s_contracts != 0:
+                avg_quantity = total_quantity / s_contracts
+                success_rate = s_contracts / total_contracts
+                priority_score = avg_quantity * success_rate
+            else:
+                priority_score = 0
+
+        # Append the partner, priority score, and initial allocation value
+        partner_list.append([p, priority_score, 0])
+        return partner_list
+        
 
     def distribute_by_info(self, need, partners):
         # Storing the needs (resources) that the agent wants to distribute
@@ -105,35 +152,10 @@ class DistRedistAgent(OneShotSyncAgent):
         # distribution occurs
             dist.update(dict(zip(partners, [0] * len(partners))))
             return dist
-# priority values
-        partner_list = [
-            [
-                partner,
-                (
-                    (
-                        self.all_partners_info[partner][1]
-                        / self.all_partners_info[partner][0]
-                    )
-                    * (
-                        self.all_partners_info[partner][0]
-                        / (
-                            self.all_partners_info[partner][2]
-                            + self.all_partners_info[partner][0]
-                        )
-                    )
-                )
-                if (
-                    self.all_partners_info[partner][0]
-                    + self.all_partners_info[partner][2]
-                )
-                != 0
-                and self.all_partners_info[partner][0] != 0
-                else 0,
-                0,
-            ]
-            for partner in partners
-        ]
-        priority_list = sorted(partner_list, key=lambda x: x[1], reverse=True)
+        
+        # priority values
+        partners_list = self.get_partners_list(partners)
+        priority_list = sorted(partners_list, key=lambda x: x[1], reverse=True)
 
         sum = 0
         for i in range(len(priority_list)):
@@ -412,6 +434,8 @@ class DistRedistAgent(OneShotSyncAgent):
                 all_partners = self.awi.my_suppliers
 
             # (Number of successful contracts, Contract quantity, Number of contract rounds, Number of unsuccessful contracts)
+            # number of contract rounds not stored 
+            # add 4th index for contract_age  
             self.all_partners_info = {partner: [0, 0, 0] for partner in all_partners}
 
         return super().before_step()
