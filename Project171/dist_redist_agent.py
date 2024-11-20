@@ -1,3 +1,5 @@
+
+    
 """
 **Submitted to ANAC 2024 SCML (OneShot track)**
 *Authors*
@@ -20,6 +22,7 @@ from negmas.sao import SAONMI
 from scml.oneshot import *
 from scml.oneshot.ufun import *
 import random
+import math
 from typing import Any
 from scml.oneshot import OneShotSyncAgent
 from negmas import Contract
@@ -60,9 +63,12 @@ class DistRedistAgent(OneShotSyncAgent):
 
     def __init__(self):
         self.random_p = 0.07
+        self.seasonal_amplitude = 0.2  # Amplitude of the seasonal effect (e.g., 20% of base price)
+        self.seasonal_frequency = 2 * math.pi / 365  # Frequency for a yearly cycle (2π / 365 days)
+        self.seasonal_phase_shift = 0  # Phase shift to align with the desired start of the cycle
         self.adaptive_threshold = 0.5  # Threshold for adapting randomness
         super().__init__()
-    
+        
     def update_randomness(self):
         """
         Adjusts random_p based on agent performance and negotiation progress.
@@ -107,6 +113,18 @@ class DistRedistAgent(OneShotSyncAgent):
         # Scale needs with randomness bias
         adjusted_needs = int(needs * (1 + (random.random() - 0.5) * self.random_p))
         dist.update(dict(zip(partner_ids, distribute(adjusted_needs, partners))))
+        return dist
+
+    def distribute_needs_randomly(self, needs, partner_ids) -> dict[str, int]:
+        dist = dict()
+        partners = len(partner_ids)
+        # if I need nothing, end all negotiations
+        if needs <= 0:
+            dist.update(dict(zip(partner_ids, [0] * partners)))
+            return dist
+
+        # distribute my needs over my (remaining) partners.
+        dist.update(dict(zip(partner_ids, distribute(int(1.35 * needs), partners))))
         return dist
 
     def distribute_by_info(self, need, partners):
@@ -241,13 +259,13 @@ class DistRedistAgent(OneShotSyncAgent):
 
         s, p = self._step_and_price(best_price=True)
 
-        # Use adaptive randomness for decision-making
         if self.awi.current_step < 10 or random.random() < self.random_p:
             distribution = self.distribute_needs_randomly(need, partners)
         else:
             distribution = self.distribute_by_info(need, partners)
 
         d = {k: (q, s, p) if q > 0 else None for k, q in distribution.items()}
+
         return d
 
     def counter_all(self, offers, states):
@@ -383,7 +401,7 @@ class DistRedistAgent(OneShotSyncAgent):
         return response
 
     def _step_and_price(self, best_price=False):
-        """Returns current step and a random (or max) price"""
+        """Returns current step and a random (or max) price with seasonal adjustment"""
         s = self.awi.current_step
         seller = self.awi.is_first_level
         issues = (
@@ -391,9 +409,45 @@ class DistRedistAgent(OneShotSyncAgent):
         )
         pmin = issues[UNIT_PRICE].min_value
         pmax = issues[UNIT_PRICE].max_value
+
+        # Base price determination
         if best_price:
-            return s, pmax if seller else pmin
-        return s, random.randint(pmin, pmax)
+            base_price = pmax if seller else pmin
+        else:
+            base_price = random.randint(pmin, pmax)
+
+        # Calculate the seasonal adjustment factor
+        # Assuming s is the day of the year (from 0 to 364)
+        seasonal_factor = self.seasonal_amplitude * math.sin(
+            self.seasonal_frequency * s + self.seasonal_phase_shift
+        )
+        
+        # Adjust the base price with the seasonal factor
+        adjusted_price = base_price * (1 + seasonal_factor)
+        adjusted_price = max(pmin, min(adjusted_price, pmax))  # Clamp the price within min and max bounds
+
+        return s, int(adjusted_price)
+
+    def thresholds_for_seasons(self):
+        seasonal_factor = self.seasonal_amplitude * math.sin(
+            self.seasonal_frequency * self.awi.current_step + self.seasonal_phase_shift
+        )
+
+        # Adjust 'th' based on seasonal pricing
+        self.th = max(0, self.base_th * (1 + seasonal_factor))
+
+        # Adjust 'th_round' to reflect urgency in different seasons
+        if seasonal_factor > 0:  # High-demand season
+            self.th_round = max(8, self.base_th_round - 4)
+        else:  # Low-demand season
+            self.th_round = min(20, self.base_th_round + 4)
+
+        # Adjust 'th_over' for excess quantity tolerance
+        if seasonal_factor > 0:  # High prices, less tolerance
+            self.th_over = max(1, self.base_th_over - 1)
+        else:  # Low prices, more tolerance
+            self.th_over = self.base_th_over + 1
+
 
     def before_step(self):
         self.round = 0
