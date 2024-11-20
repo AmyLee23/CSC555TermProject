@@ -13,7 +13,7 @@ def run(
     competitors=tuple(),
     competition="oneshot",
     reveal_names=True,
-    n_steps=10,  # 変更済もともとは10
+    n_steps=10,
     n_configs=2,
 ):
     """
