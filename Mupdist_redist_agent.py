@@ -64,6 +64,10 @@ class DistRedistAgent(OneShotSyncAgent):
         self.seasonal_amplitude = 0.2  # Amplitude of the seasonal effect (e.g., 20% of base price)
         self.seasonal_frequency = 2 * math.pi / 365  # Frequency for a yearly cycle (2π / 365 days)
         self.seasonal_phase_shift = 0  # Phase shift to align with the desired start of the cycle
+        self.base_th = 10  # Example value, adjust as needed
+        self.base_th_round = 16  # Example value, adjust as needed
+        self.base_th_over = 2 
+
         super().__init__()
 
     def distribute_needs_randomly(self, needs, partner_ids) -> dict[str, int]:
@@ -361,6 +365,8 @@ class DistRedistAgent(OneShotSyncAgent):
         pmin = issues[UNIT_PRICE].min_value
         pmax = issues[UNIT_PRICE].max_value
 
+        self.thresholds_for_seasons()  # Adjust thresholds based on the season
+
         # Base price determination
         if best_price:
             base_price = pmax if seller else pmin
@@ -368,16 +374,15 @@ class DistRedistAgent(OneShotSyncAgent):
             base_price = random.randint(pmin, pmax)
 
         # Calculate the seasonal adjustment factor
-        # Assuming s is the day of the year (from 0 to 364)
         seasonal_factor = self.seasonal_amplitude * math.sin(
             self.seasonal_frequency * s + self.seasonal_phase_shift
         )
-        
         # Adjust the base price with the seasonal factor
         adjusted_price = base_price * (1 + seasonal_factor)
         adjusted_price = max(pmin, min(adjusted_price, pmax))  # Clamp the price within min and max bounds
 
         return s, int(adjusted_price)
+
 
     def thresholds_for_seasons(self):
         seasonal_factor = self.seasonal_amplitude * math.sin(
