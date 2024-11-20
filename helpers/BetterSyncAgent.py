@@ -14,7 +14,7 @@ from negmas import SAOResponse, ResponseType, Outcome, SAOState
 from scml.oneshot.world import SCML2024OneShotWorld as W
 from scml.oneshot import *
 
-
+import math
 import random
 
 # required for typing
@@ -51,6 +51,16 @@ def powerset(iterable):
 
 class BetterSyncAgent(OneShotSyncAgent):
     """An agent that distributes its needs over its partners randomly."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.base_needs = 100  # Base needs value, could be a constant or dependent on the agent’s state
+        self.seasonal_amplitude = 0.2  # Amplitude of the seasonal effect (20% of base price)
+        self.seasonal_frequency = 2 * math.pi / 365  # Frequency for a yearly cycle (2π / 365 days)
+        self.seasonal_phase_shift = 0  # Phase shift to align with the desired start of the cycle
+        self.base_th = 10  # Example threshold value for synchronization, adjust as needed
+        self.base_th_round = 16  # Example threshold for rounding, adjust as needed
+        self.base_th_over = 2
+        self.needs = self.base_needs
 
     def distribute_needs(self) -> dict[str, int]:
         """Distributes my needs randomly over all my partners"""
@@ -151,8 +161,9 @@ class BetterSyncAgent(OneShotSyncAgent):
         mn, mx = 0, self.awi.n_lines // 2
         return mn + (mx - mn) * (r**4.0)
 
+
     def _step_and_price(self, best_price=False):
-        """Returns current step and a random (or max) price"""
+        """Returns current step and a random (or max) price with seasonal adjustment"""
         s = self.awi.current_step
         seller = self.awi.is_first_level
         issues = (
@@ -160,9 +171,45 @@ class BetterSyncAgent(OneShotSyncAgent):
         )
         pmin = issues[UNIT_PRICE].min_value
         pmax = issues[UNIT_PRICE].max_value
+
+        self.thresholds_for_seasons()  
+
+        # Getting the Price
         if best_price:
-            return s, pmax if seller else pmin
-        return s, random.randint(pmin, pmax)
+            base_price = pmax if seller else pmin
+        else:
+            base_price = random.randint(pmin, pmax)
+
+        # Calculate the seasonal adjustment factor
+        seasonal_factor = self.seasonal_amplitude * math.sin(
+            self.seasonal_frequency * s + self.seasonal_phase_shift
+        )
+        # Adjust the base price with the seasonal factor
+        adjusted_price = base_price * (1 + seasonal_factor)
+        adjusted_price = max(pmin, min(adjusted_price, pmax))  # Clamp the price within min and max bounds
+
+        return s, int(adjusted_price)
+
+
+    def thresholds_for_seasons(self):
+        seasonal_factor = self.seasonal_amplitude * math.sin(
+            self.seasonal_frequency * self.awi.current_step + self.seasonal_phase_shift
+        )
+
+        # Adjust 'th' based on seasonal pricing
+        self.th = max(0, self.base_th * (1 + seasonal_factor))
+
+        # Adjust 'th_round' to reflect urgency in different seasons
+        if seasonal_factor > 0:  # High-demand season
+            self.th_round = max(8, self.base_th_round - 4)
+        else:  # Low-demand season
+            self.th_round = min(20, self.base_th_round + 4)
+
+        # Adjust 'th_over' for too much tolerance
+        if seasonal_factor > 0:  # High prices, less tolerance
+            self.th_over = max(1, self.base_th_over - 1)
+        else:  # low prices, more tolerance
+            self.th_over = self.base_th_over + 1
     
 
 if __name__ == "__main__":
