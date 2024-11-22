@@ -2,18 +2,18 @@ import time
 
 from negmas.helpers import humanize_time
 from rich import print
-from scml.oneshot.agents import RandomOneShotAgent, SyncRandomOneShotAgent
-from helpers.BetterSyncAgent import BetterSyncAgent
+#from scml.oneshot.agents import RandomOneShotAgent, SyncRandomOneShotAgent
+from helpers.seasonBetterSyncAgent import BetterSyncAgent   # agent we want to compare to 
 from scml.std.agents import SyncRandomStdAgent
 from scml.utils import anac2024_oneshot, anac2024_std
 from tabulate import tabulate
-
+from or_dist_redist_agent import DistRedistAgent        # agent we want to compare to 
 
 def run(
     competitors=tuple(),
     competition="oneshot",
     reveal_names=True,
-    n_steps=10,  # 変更済もともとは10
+    n_steps=10,
     n_configs=2,
 ):
     """
@@ -38,10 +38,8 @@ def run(
 
     """
 
-    if competition == "oneshot":
-        competitors = list(competitors) + [RandomOneShotAgent, SyncRandomOneShotAgent, BetterSyncAgent]
-    else:
-        competitors = list(competitors) + [SyncRandomStdAgent, RandomOneShotAgent]
+    # agents with seasonal modifications
+    competitors = list(competitors) + [BetterSyncAgent, DistRedistAgent]
 
     start = time.perf_counter()
     if competition == "std":
