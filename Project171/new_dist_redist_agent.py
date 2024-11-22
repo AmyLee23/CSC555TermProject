@@ -1,18 +1,5 @@
-
-    
 """
-**Submitted to ANAC 2024 SCML (OneShot track)**
-*Authors*
-        Name : Hajime Endo (20213)
-        Nationality : Japan
-        Email : endo@katfuji.lab.tuat.ac.jp
-        Univ : Tokyo University of Agriculture and Technology
-
-This code is free to use or update given that proper attribution is given to
-the authors and the ANAC 2024 SCML.
-
-I would like to extend my heartfelt gratitude to everyone involved in the organization of ANAC 2024,
-as well as to all the participants who competed alongside me. Thank you.
+new dist_redist with seasons, adaptive random and weighted 
 
 """
 
@@ -22,13 +9,13 @@ from negmas.sao import SAONMI
 from scml.oneshot import *
 from scml.oneshot.ufun import *
 import random
-import math
 from typing import Any
 from scml.oneshot import OneShotSyncAgent
 from negmas import Contract
 from itertools import chain, combinations
+import math
 
-__all__ = ["DistRedistAgent"]
+__all__ = ["NewDistRedistAgent"]
 
 
 def distribute(q: int, n: int) -> list[int]:
@@ -56,19 +43,23 @@ def powerset(iterable):
     return chain.from_iterable(combinations(s, r) for r in range(len(s) + 1))
 
 
-class DistRedistAgent(OneShotSyncAgent):
+class NewDistRedistAgent(OneShotSyncAgent):
     round: int
     random_p: float
-    all_partners_info = dict()
+    all_partners_info = dict()  # adding a new field to this dict
 
     def __init__(self):
         self.random_p = 0.07
+        self.adaptive_threshold = 0.5  # Threshold for adapting randomness
+        self.decay_factor = 0.9  # Decay factor for historical data (e.g., 0.9 means a 10% decay per step)
         self.seasonal_amplitude = 0.2  # Amplitude of the seasonal effect (e.g., 20% of base price)
         self.seasonal_frequency = 2 * math.pi / 365  # Frequency for a yearly cycle (2π / 365 days)
         self.seasonal_phase_shift = 0  # Phase shift to align with the desired start of the cycle
-        self.adaptive_threshold = 0.5  # Threshold for adapting randomness
+        self.base_th = 10  # Example value, adjust as needed
+        self.base_th_round = 16  # Example value, adjust as needed
+        self.base_th_over = 2 
         super().__init__()
-        
+
     def update_randomness(self):
         """
         Adjusts random_p based on agent performance and negotiation progress.
@@ -114,56 +105,69 @@ class DistRedistAgent(OneShotSyncAgent):
         adjusted_needs = int(needs * (1 + (random.random() - 0.5) * self.random_p))
         dist.update(dict(zip(partner_ids, distribute(adjusted_needs, partners))))
         return dist
+    
+    # Calculate a priority score based on exponential decay (10%)
+    def calc_weighted_score(self, partners) :
+        for p in partners: 
+            s_contracts = self.all_partners_info[p][0]
+            total_quantity = self.all_partners_info[p][1]
+            u_contracts = self.all_partners_info[p][2]
+            contractAge = self.all_partners_info[p][3]
 
-    def distribute_needs_randomly(self, needs, partner_ids) -> dict[str, int]:
-        dist = dict()
-        partners = len(partner_ids)
-        # if I need nothing, end all negotiations
-        if needs <= 0:
-            dist.update(dict(zip(partner_ids, [0] * partners)))
-            return dist
+            # Apply the decay factor to adjust the weight of older data
+            ds_contracts = s_contracts * (self.decay_factor ** contractAge)
+            decayed_total_quantity = total_quantity * (self.decay_factor ** contractAge)
+            du_contracts = u_contracts * (self.decay_factor ** contractAge)
+            totald_contracts = ds_contracts + du_contracts
 
-        # distribute my needs over my (remaining) partners.
-        dist.update(dict(zip(partner_ids, distribute(int(1.35 * needs), partners))))
-        return dist
+            # Calculate average quantity and success rate using decayed values
+            if (totald_contracts) == 0 or ds_contracts == 0:
+                return 0
+
+            average_quantity = decayed_total_quantity / ds_contracts    # this is the important change 
+            success_rate = ds_contracts / totald_contracts
+
+            priority_score = average_quantity * success_rate
+        return priority_score
+
+    # original priority score calculation, without decay factor 
+    def get_partners_list(self, partners) :
+        partner_list = []
+
+        for p in partners:
+            s_contracts = self.all_partners_info[p][0]
+            total_quantity = self.all_partners_info[p][1]
+            u_contracts = self.all_partners_info[p][2]
+            total_contracts = s_contracts + u_contracts
+
+            # Check if the denominator is not zero to avoid division errors
+            if total_contracts != 0 and s_contracts != 0:
+                avg_quantity = total_quantity / s_contracts
+                success_rate = s_contracts / total_contracts
+                priority_score = avg_quantity * success_rate
+            else:
+                priority_score = 0
+
+        # Append the partner, priority score, and initial allocation value
+        partner_list.append([p, priority_score, 0])
+        return partner_list
+        
 
     def distribute_by_info(self, need, partners):
         dist = dict()
-
         if len(partners) == 0:
             return dist
 
         if need <= 0:
             dist.update(dict(zip(partners, [0] * len(partners))))
-            return dist
 
+        #partners_list = self.get_partners_list(partners)
+
+        # Calculate priority scores for each partner
         partner_list = [
-            [
-                partner,
-                (
-                    (
-                        self.all_partners_info[partner][1]
-                        / self.all_partners_info[partner][0]
-                    )
-                    * (
-                        self.all_partners_info[partner][0]
-                        / (
-                            self.all_partners_info[partner][2]
-                            + self.all_partners_info[partner][0]
-                        )
-                    )
-                )
-                if (
-                    self.all_partners_info[partner][0]
-                    + self.all_partners_info[partner][2]
-                )
-                != 0
-                and self.all_partners_info[partner][0] != 0
-                else 0,
-                0,
-            ]
-            for partner in partners
+            [partner, self.calc_weighted_score(partner), 0] for partner in partners
         ]
+
         priority_list = sorted(partner_list, key=lambda x: x[1], reverse=True)
 
         sum = 0
@@ -410,6 +414,8 @@ class DistRedistAgent(OneShotSyncAgent):
         pmin = issues[UNIT_PRICE].min_value
         pmax = issues[UNIT_PRICE].max_value
 
+        self.thresholds_for_seasons()  # Adjust thresholds based on the season
+
         # Base price determination
         if best_price:
             base_price = pmax if seller else pmin
@@ -417,16 +423,15 @@ class DistRedistAgent(OneShotSyncAgent):
             base_price = random.randint(pmin, pmax)
 
         # Calculate the seasonal adjustment factor
-        # Assuming s is the day of the year (from 0 to 364)
         seasonal_factor = self.seasonal_amplitude * math.sin(
             self.seasonal_frequency * s + self.seasonal_phase_shift
         )
-        
         # Adjust the base price with the seasonal factor
         adjusted_price = base_price * (1 + seasonal_factor)
         adjusted_price = max(pmin, min(adjusted_price, pmax))  # Clamp the price within min and max bounds
 
         return s, int(adjusted_price)
+
 
     def thresholds_for_seasons(self):
         seasonal_factor = self.seasonal_amplitude * math.sin(
@@ -448,20 +453,24 @@ class DistRedistAgent(OneShotSyncAgent):
         else:  # Low prices, more tolerance
             self.th_over = self.base_th_over + 1
 
-
     def before_step(self):
         self.round = 0
-
+        # Check if the all_partners_info dictionary has been initialized
         if self.awi.current_step == 0:
-            if self.awi.is_first_level == True:
+            if self.awi.is_first_level:
                 all_partners = self.awi.my_consumers
             else:
                 all_partners = self.awi.my_suppliers
 
-            # (Number of successful contracts, Contract quantity, Number of contract rounds, Number of unsuccessful contracts)
-            self.all_partners_info = {partner: [0, 0, 0] for partner in all_partners}
+            # Initialize all_partners_info only once, without resetting at every step
+            self.all_partners_info = {partner: [0, 0, 0, 0] for partner in all_partners}
+        else:
+            # Increment the age of data for each partner in subsequent steps
+            for p in self.all_partners_info:
+                self.all_partners_info[p][3] += 1  # Increment age of data
 
         return super().before_step()
+    
 
     def on_negotiation_success(self, contract: Contract, mechanism: SAONMI) -> None:
         if self.awi.is_first_level == True:
@@ -494,5 +503,4 @@ if __name__ == "__main__":
 
     from helpers.runner import run
 
-    run([DistRedistAgent], sys.argv[1] if len(sys.argv) > 1 else "oneshot")
-    
+    run([NewDistRedistAgent], sys.argv[1] if len(sys.argv) > 1 else "oneshot")
