@@ -501,8 +501,8 @@ class NewDistRedistAgent(OneShotSyncAgent):
 if __name__ == "__main__":
     import sys
 
-    #from helpers.runner import run
-    from helpers.multiple_runs import run_multiple
+    from helpers.runner import run_multiple
+    #from helpers.multiple_runs import run_multiple
 
    #run([NewDistRedistAgent], sys.argv[1] if len(sys.argv) > 1 else "oneshot")
     run_multiple([NewDistRedistAgent], sys.argv[1] if len(sys.argv) > 1 else "oneshot")
